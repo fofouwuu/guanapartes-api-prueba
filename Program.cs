@@ -1,34 +1,104 @@
+
 using MySqlConnector;
 using Microsoft.Extensions.FileProviders;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Lee la contraseña guardada con user-secrets.
+// ==========================================
+// CONFIGURACIÓN CORS PARA VERCEL
+// ==========================================
+
+// Dirección de la página publicada en Vercel.
+// Se configurará mediante una variable en Railway.
+var origenVercel = builder.Configuration["Cors:OrigenVercel"];
+
+// Direcciones permitidas durante el desarrollo local.
+var origenesPermitidos = new List<string>
+{
+    "http://localhost:5500",
+    "http://127.0.0.1:5500"
+};
+
+// Agregar la dirección pública de Vercel.
+if (!string.IsNullOrWhiteSpace(origenVercel))
+{
+    origenesPermitidos.Add(
+        origenVercel.Trim().TrimEnd('/')
+    );
+}
+
+// Permitir solicitudes desde la página web.
+builder.Services.AddCors(opciones =>
+{
+    opciones.AddPolicy("PaginaGuanapartes", politica =>
+    {
+        politica
+            .WithOrigins(origenesPermitidos.ToArray())
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
+
+
+// ==========================================
+// CONFIGURACIÓN DE MYSQL
+// ==========================================
+
+// Lee la contraseña desde la configuración.
+// En desarrollo puede utilizar user-secrets.
+// En Railway utiliza las variables de entorno.
 var contraseña = builder.Configuration["MySql:Password"];
 
 if (contraseña is null)
 {
     throw new InvalidOperationException(
-        "Falta MySql:Password. Ejecuta el proyecto en Development " +
-        "y comprueba la configuración de user-secrets."
+        "Falta MySql:Password. Comprueba la configuración " +
+        "de user-secrets o las variables de entorno."
     );
 }
 
-// Datos de conexión con la base local.
+// Datos de conexión.
+// En Railway se utilizan los valores configurados
+// en las variables de entorno.
 var configuracion = new MySqlConnectionStringBuilder
 {
     Server = builder.Configuration["MySql:Server"] ?? "localhost",
-    Port = builder.Configuration.GetValue<uint>("MySql:Port", 3306),
-    Database = builder.Configuration["MySql:Database"] ?? "guanapartes_sa",
+
+    Port = builder.Configuration.GetValue<uint>(
+        "MySql:Port", 3306
+    ),
+
+    Database = builder.Configuration["MySql:Database"]
+        ?? "guanapartes_sa",
+
     UserID = builder.Configuration["MySql:User"] ?? "root",
+
     Password = contraseña
 };
 
 var cadenaConexion = configuracion.ConnectionString;
 
+
+// ==========================================
+// CREACIÓN DE LA APLICACIÓN
+// ==========================================
+
 var app = builder.Build();
 
-// En tu computadora, la API también sirve los archivos de la página.
-// En el servidor, la página estará publicada por separado en Vercel.
+// Activar CORS para permitir las conexiones
+// desde la página publicada en Vercel.
+app.UseCors("PaginaGuanapartes");
+
+
+// ==========================================
+// ARCHIVOS DE LA PÁGINA EN DESARROLLO
+// ==========================================
+
+// En tu computadora, la API también sirve
+// los archivos de la página web.
+//
+// En Railway la página estará publicada
+// por separado mediante Vercel.
 if (app.Environment.IsDevelopment())
 {
     var archivosPagina = new PhysicalFileProvider(
@@ -39,8 +109,15 @@ if (app.Environment.IsDevelopment())
     {
         FileProvider = archivosPagina
     });
-} 
-// Maneja errores de MySQL sin mostrar la contraseña.
+}
+
+
+// ==========================================
+// MANEJO DE ERRORES MYSQL
+// ==========================================
+
+// Evita mostrar información sensible
+// cuando ocurre un error de conexión.
 app.Use(async (contexto, siguiente) =>
 {
     try
@@ -64,13 +141,25 @@ app.Use(async (contexto, siguiente) =>
     }
 });
 
-// Página inicial del backend.
-app.MapGet("/", () => "API de Guanapartes funcionando.");
 
-// Conservamos la prueba de conexión.
+// ==========================================
+// PÁGINA INICIAL DE LA API
+// ==========================================
+
+app.MapGet("/", () =>
+    "API de Guanapartes funcionando."
+);
+
+
+// ==========================================
+// PRUEBA DE CONEXIÓN MYSQL
+// ==========================================
+
 app.MapGet("/api/prueba-conexion", async () =>
 {
-    await using var conexion = new MySqlConnection(cadenaConexion);
+    await using var conexion =
+        new MySqlConnection(cadenaConexion);
+
     await conexion.OpenAsync();
 
     await using var comando = new MySqlCommand(
@@ -78,25 +167,37 @@ app.MapGet("/api/prueba-conexion", async () =>
         conexion
     );
 
-    var total = Convert.ToInt64(await comando.ExecuteScalarAsync());
+    var total = Convert.ToInt64(
+        await comando.ExecuteScalarAsync()
+    );
 
     return Results.Ok(new
     {
         conectado = true,
+
         mensaje = "Conexión con MySQL realizada correctamente.",
+
         totalProductos = total
     });
 });
 
-// Consulta productos con búsqueda, marca y paginación.
+
+// ==========================================
+// CONSULTA DE PRODUCTOS
+// ==========================================
+
+// Permite consultar el inventario de prueba
+// con búsqueda, filtro de marca y paginación.
 app.MapGet("/api/productos", async (
     int? pagina,
     string? buscar,
     string? marca) =>
 {
     var paginaActual = pagina ?? 1;
+
     const int porPagina = 24;
 
+    // Validar el número de página.
     if (paginaActual < 1)
     {
         return Results.BadRequest(new
@@ -108,7 +209,9 @@ app.MapGet("/api/productos", async (
     var textoBusqueda = (buscar ?? "").Trim();
     var marcaSeleccionada = (marca ?? "").Trim();
 
-    if (textoBusqueda.Length > 150 || marcaSeleccionada.Length > 100)
+    // Limitar la longitud de las búsquedas.
+    if (textoBusqueda.Length > 150 ||
+        marcaSeleccionada.Length > 100)
     {
         return Results.BadRequest(new
         {
@@ -116,13 +219,21 @@ app.MapGet("/api/productos", async (
         });
     }
 
-    var desplazamiento = ((long)paginaActual - 1) * porPagina;
+    var desplazamiento =
+        ((long)paginaActual - 1) * porPagina;
 
-    await using var conexion = new MySqlConnection(cadenaConexion);
+    await using var conexion =
+        new MySqlConnection(cadenaConexion);
+
     await conexion.OpenAsync();
 
-    // Los valores se envían como parámetros.
-    // No se concatenan dentro de la consulta SQL.
+
+    // ======================================
+    // FILTROS DE BÚSQUEDA
+    // ======================================
+
+    // Los valores se envían como parámetros
+    // para evitar inyección SQL.
     const string filtros = """
         WHERE
             (
@@ -139,20 +250,33 @@ app.MapGet("/api/productos", async (
             AND (@marca = '' OR `MARCA` = @marca)
         """;
 
-    // Cuenta todos los resultados que cumplen los filtros.
+
+    // ======================================
+    // CONTAR LOS RESULTADOS
+    // ======================================
+
     await using var comandoTotal = new MySqlCommand(
         "SELECT COUNT(*) FROM productos " + filtros,
         conexion
     );
 
-    comandoTotal.Parameters.AddWithValue("@buscar", textoBusqueda);
-    comandoTotal.Parameters.AddWithValue("@marca", marcaSeleccionada);
+    comandoTotal.Parameters.AddWithValue(
+        "@buscar", textoBusqueda
+    );
+
+    comandoTotal.Parameters.AddWithValue(
+        "@marca", marcaSeleccionada
+    );
 
     var totalProductos = Convert.ToInt64(
         await comandoTotal.ExecuteScalarAsync()
     );
 
-    // Devuelve únicamente los datos del catálogo.
+
+    // ======================================
+    // OBTENER LOS PRODUCTOS
+    // ======================================
+
     var consulta = """
         SELECT
             `ITEM`,
@@ -169,16 +293,34 @@ app.MapGet("/api/productos", async (
         LIMIT @limite OFFSET @desplazamiento;
         """;
 
-    await using var comando = new MySqlCommand(consulta, conexion);
+    await using var comando =
+        new MySqlCommand(consulta, conexion);
 
-    comando.Parameters.AddWithValue("@buscar", textoBusqueda);
-    comando.Parameters.AddWithValue("@marca", marcaSeleccionada);
-    comando.Parameters.AddWithValue("@limite", porPagina);
-    comando.Parameters.AddWithValue("@desplazamiento", desplazamiento);
+    comando.Parameters.AddWithValue(
+        "@buscar", textoBusqueda
+    );
+
+    comando.Parameters.AddWithValue(
+        "@marca", marcaSeleccionada
+    );
+
+    comando.Parameters.AddWithValue(
+        "@limite", porPagina
+    );
+
+    comando.Parameters.AddWithValue(
+        "@desplazamiento", desplazamiento
+    );
+
+
+    // ======================================
+    // CONSTRUIR LA RESPUESTA
+    // ======================================
 
     var productos = new List<object>();
 
-    await using var lector = await comando.ExecuteReaderAsync();
+    await using var lector =
+        await comando.ExecuteReaderAsync();
 
     while (await lector.ReadAsync())
     {
@@ -208,22 +350,35 @@ app.MapGet("/api/productos", async (
         });
     }
 
+    // Devolver los productos y la paginación.
     return Results.Ok(new
     {
         pagina = paginaActual,
+
         porPagina,
+
         totalProductos,
+
         totalPaginas = (long)Math.Ceiling(
             totalProductos / (double)porPagina
         ),
+
         productos
     });
 });
 
-// Marcas existentes para el futuro filtro del catálogo.
+
+// ==========================================
+// CONSULTA DE MARCAS
+// ==========================================
+
+// Devuelve las marcas existentes
+// para utilizarlas en los filtros del catálogo.
 app.MapGet("/api/marcas", async () =>
 {
-    await using var conexion = new MySqlConnection(cadenaConexion);
+    await using var conexion =
+        new MySqlConnection(cadenaConexion);
+
     await conexion.OpenAsync();
 
     const string consulta = """
@@ -234,8 +389,11 @@ app.MapGet("/api/marcas", async () =>
         ORDER BY `MARCA`;
         """;
 
-    await using var comando = new MySqlCommand(consulta, conexion);
-    await using var lector = await comando.ExecuteReaderAsync();
+    await using var comando =
+        new MySqlCommand(consulta, conexion);
+
+    await using var lector =
+        await comando.ExecuteReaderAsync();
 
     var marcas = new List<string>();
 
@@ -246,5 +404,10 @@ app.MapGet("/api/marcas", async () =>
 
     return Results.Ok(marcas);
 });
+
+
+// ==========================================
+// INICIAR LA API
+// ==========================================
 
 app.Run();
