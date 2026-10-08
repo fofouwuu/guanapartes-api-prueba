@@ -1,0 +1,25 @@
+# Archivos generados al compilar
+bin/
+obj/
+publish/
+
+# Configuración local del editor
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Contraseñas y configuración privada
+.env
+.env.*
+!.env.example
+secrets.json
+appsettings.Local.json
+
+# Copias de bases de datos
+*.sql
+*.sql.gz
+*.bak
+
+# Registros
+*.log
