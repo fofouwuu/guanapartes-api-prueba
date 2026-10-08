@@ -1,0 +1,14 @@
+**/bin/
+**/obj/
+.git/
+.vs/
+.vscode/
+publish/
+.env
+.env.*
+**/secrets.json
+**/appsettings.Local.json
+**/*.sql
+**/*.sql.gz
+**/*.bak
+**/*.log
